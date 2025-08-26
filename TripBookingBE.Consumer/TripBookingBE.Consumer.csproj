@@ -10,5 +10,8 @@
     <OutputPath>$(SolutionDir)bin/$(Configuration)</OutputPath>
     <_FunctionsSkipCleanOutput>true</_FunctionsSkipCleanOutput>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="RabbitMQ.Client" Version="7.0.0" />
+  </ItemGroup>
 
 </Project>
