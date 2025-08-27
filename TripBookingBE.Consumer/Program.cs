@@ -6,8 +6,11 @@ var factory = new ConnectionFactory { HostName = "localhost", Port = 6078 };
 using var connection = await factory.CreateConnectionAsync();
 using var channel = await connection.CreateChannelAsync();
 
-await channel.QueueDeclareAsync(queue: "task_queue", durable: true, exclusive: false,
-autoDelete: false, arguments: null);
+await channel.ExchangeDeclareAsync(exchange: "logs", type: ExchangeType.Fanout);
+QueueDeclareOk queueDeclareResult = await channel.QueueDeclareAsync();
+string queueName = queueDeclareResult.QueueName;
+Console.WriteLine($"Instance exclusive queue: {queueName}");
+await channel.QueueBindAsync(queue: queueName, exchange: "logs", routingKey: string.Empty);
 await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false);
 
 Console.WriteLine(" [*] Waiting for messages.");
@@ -27,7 +30,7 @@ consumer.ReceivedAsync += async (model, ea) =>
     await channel.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);
 };
 
-await channel.BasicConsumeAsync("task_queue", autoAck: false, consumer: consumer);
+await channel.BasicConsumeAsync(queueName, autoAck: false, consumer: consumer);
 
 Console.WriteLine(" Press [enter] to exit.");
 Console.ReadLine();
