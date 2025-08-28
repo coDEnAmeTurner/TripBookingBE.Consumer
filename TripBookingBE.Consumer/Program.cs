@@ -2,35 +2,42 @@
 using RabbitMQ.Client.Events;
 using System.Text;
 
-var factory = new ConnectionFactory { HostName = "localhost", Port = 6078 };
-using var connection = await factory.CreateConnectionAsync();
-using var channel = await connection.CreateChannelAsync();
-
-await channel.ExchangeDeclareAsync(exchange: "logs", type: ExchangeType.Fanout);
-QueueDeclareOk queueDeclareResult = await channel.QueueDeclareAsync();
-string queueName = queueDeclareResult.QueueName;
-Console.WriteLine($"Instance exclusive queue: {queueName}");
-await channel.QueueBindAsync(queue: queueName, exchange: "logs", routingKey: string.Empty);
-await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false);
-
-Console.WriteLine(" [*] Waiting for messages.");
-
-var consumer = new AsyncEventingBasicConsumer(channel);
-consumer.ReceivedAsync += async (model, ea) =>
+internal class Program
 {
-    var body = ea.Body.ToArray();
-    var message = Encoding.UTF8.GetString(body);
-    Console.WriteLine($" [x] Received {message}");
+    private static async Task Main(string[] args)
+    {
+        var factory = new ConnectionFactory { HostName = "localhost", Port = 6078 };
+        using var connection = await factory.CreateConnectionAsync();
+        using var channel = await connection.CreateChannelAsync();
 
-    int dots = message.Split('.').Length - 1;
-    await Task.Delay(dots * 1000);
+        await channel.ExchangeDeclareAsync(exchange: "logs", type: ExchangeType.Direct);
+        QueueDeclareOk queueDeclareResult = await channel.QueueDeclareAsync();
+        string queueName = queueDeclareResult.QueueName;
+        Console.WriteLine($"Instance exclusive queue: {queueName}");
+        foreach (var severity in args)
+        { await channel.QueueBindAsync(queue: queueName, exchange: "logs", routingKey: severity); }
+        await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false);
 
-    Console.WriteLine(" [x] Done");
+        Console.WriteLine(" [*] Waiting for messages.");
 
-    await channel.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);
-};
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.ReceivedAsync += async (model, ea) =>
+        {
+            var body = ea.Body.ToArray();
+            var message = Encoding.UTF8.GetString(body);
+            Console.WriteLine($" [x] Received {message}");
 
-await channel.BasicConsumeAsync(queueName, autoAck: false, consumer: consumer);
+            int dots = message.Split('.').Length - 1;
+            await Task.Delay(dots * 1000);
 
-Console.WriteLine(" Press [enter] to exit.");
-Console.ReadLine();
+            Console.WriteLine(" [x] Done");
+
+            await channel.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);
+        };
+
+        await channel.BasicConsumeAsync(queueName, autoAck: false, consumer: consumer);
+
+        Console.WriteLine(" Press [enter] to exit.");
+        Console.ReadLine();
+    }
+}
