@@ -10,7 +10,7 @@ internal class Program
         using var connection = await factory.CreateConnectionAsync();
         using var channel = await connection.CreateChannelAsync();
 
-        await channel.ExchangeDeclareAsync(exchange: "logs", type: ExchangeType.Direct);
+        await channel.ExchangeDeclareAsync(exchange: "logs", type: ExchangeType.Topic);
         QueueDeclareOk queueDeclareResult = await channel.QueueDeclareAsync();
         string queueName = queueDeclareResult.QueueName;
         Console.WriteLine($"Instance exclusive queue: {queueName}");
