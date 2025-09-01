@@ -1,21 +1,35 @@
-﻿using RabbitMQ.Client;
+﻿using Microsoft.Extensions.Configuration;
+using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using SendGrid;
+using SendGrid.Helpers.Mail;
 using System.Text;
+using System.Text.Json;
+using TripBookingBE.Consumer.DTO.EmailDTO;
 
 internal class Program
-{
-    const string QUEUE_NAME = "logs";
+{   
     private static async Task Main(string[] args)
     {
-        var factory = new ConnectionFactory { HostName = "localhost", Port = 6078 };
+        var config = new ConfigurationBuilder()
+            .SetBasePath($"{Directory.GetCurrentDirectory()}")
+            .AddJsonFile("appsettings.json")
+            .Build();
+
+        var hostname = config.GetValue<string>("RabbitMqConfigs:HostName");
+        var port = config.GetValue<int>("RabbitMqConfigs:Port");
+        var emailqueue = config.GetValue<string>("RabbitMqConfigs:EmailQueueName");
+        var fromemail = config.GetValue<string>("SendGridConfigs:FromEmail");
+        var fromname = config.GetValue<string>("SendGridConfigs:FromName");
+        var sendGridClient = new SendGridClient(apiKey: config.GetValue<string>("SendGridConfigs:ApiKey"));
+
+        var factory = new ConnectionFactory { HostName = hostname, Port = port };
         using var connection = await factory.CreateConnectionAsync();
         using var channel = await connection.CreateChannelAsync();
 
-        await channel.QueueDeclareAsync(queue: QUEUE_NAME, durable: true, exclusive: false,
+        await channel.QueueDeclareAsync(queue: emailqueue, durable: true, exclusive: false,
     autoDelete: false, arguments: null);
         await channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false);
-
-        Console.WriteLine(" [*] Waiting for messages.");
 
         var consumer = new AsyncEventingBasicConsumer(channel);
 
@@ -26,34 +40,51 @@ internal class Program
 
             var body = ea.Body.ToArray();
 
+            var dto = new EmailSendDTO();
+
+            IReadOnlyBasicProperties props = ea.BasicProperties;
+            var replyProps = new BasicProperties
+            {
+                CorrelationId = props.CorrelationId
+            };
+
             try
             {
                 var message = Encoding.UTF8.GetString(body);
-                Console.WriteLine($"Message received: {message}");
+                var messobj = JsonSerializer.Deserialize<EmailSendBrokerDTO>(message);
+
+                var msg = new SendGridMessage()
+                {
+                    From = new EmailAddress(fromemail, fromname),
+                    Subject = messobj.Subject,
+                    HtmlContent = messobj.Htmlbody,
+                    PlainTextContent = messobj.PlainText
+                };
+                msg.AddTo(new EmailAddress(messobj.ToEmail));
+                var response = await sendGridClient.SendEmailAsync(msg);
+                if (!response.IsSuccessStatusCode)
+                {
+                    dto.RespCode = (int)response.StatusCode;
+                    dto.Message = response.Body.ToString();
+                }
             }
             catch (Exception e)
             {
-                Console.WriteLine($" [.] {e.Message};{e.InnerException?.Message}");
+                Console.WriteLine($" [Exception] {e.Message};{e.InnerException?.Message}");
+                dto.RespCode = 500;
+                dto.Message = $"{e.Message}\t{e.InnerException?.Message}";
             }
             finally
             {
+                string response = JsonSerializer.Serialize(dto);
+                var responseBytes = Encoding.UTF8.GetBytes(response);
+                await ch.BasicPublishAsync(exchange: string.Empty, routingKey: props.ReplyTo!,
+                    mandatory: true, basicProperties: replyProps, body: responseBytes);
                 await ch.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);
+
             }
         };
 
-        await channel.BasicConsumeAsync(QUEUE_NAME, autoAck: false, consumer: consumer);
-
-        Console.WriteLine(" Press [enter] to exit.");
-        Console.ReadLine();
-    }
-
-    static int Fib(int n)
-    {
-        if (n is 0 or 1)
-        {
-            return n;
-        }
-
-        return Fib(n - 1) + Fib(n - 2);
+        await channel.BasicConsumeAsync(emailqueue, autoAck: false, consumer: consumer);
     }
 }
