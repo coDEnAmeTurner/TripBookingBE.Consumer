@@ -8,7 +8,7 @@ using System.Text.Json;
 using TripBookingBE.Consumer.DTO.EmailDTO;
 
 internal class Program
-{   
+{
     private static async Task Main(string[] args)
     {
         var config = new ConfigurationBuilder()
@@ -51,6 +51,8 @@ internal class Program
             try
             {
                 var message = Encoding.UTF8.GetString(body);
+                Console.WriteLine($" [Consumer] Message: {message}");
+
                 var messobj = JsonSerializer.Deserialize<EmailSendBrokerDTO>(message);
 
                 var msg = new SendGridMessage()
@@ -77,6 +79,8 @@ internal class Program
             finally
             {
                 string response = JsonSerializer.Serialize(dto);
+                Console.WriteLine($" [Consumer] {response}");
+
                 var responseBytes = Encoding.UTF8.GetBytes(response);
                 await ch.BasicPublishAsync(exchange: string.Empty, routingKey: props.ReplyTo!,
                     mandatory: true, basicProperties: replyProps, body: responseBytes);
@@ -86,5 +90,7 @@ internal class Program
         };
 
         await channel.BasicConsumeAsync(emailqueue, autoAck: false, consumer: consumer);
+        Console.WriteLine("Press [enter] to end process!");
+        Console.ReadLine();
     }
 }
